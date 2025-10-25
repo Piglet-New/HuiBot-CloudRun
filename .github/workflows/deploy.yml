@@ -91,5 +91,8 @@ jobs:
 
       - name: Smoke check
         run: |
-          URL="${{ steps.url.outputs.url }}"
-          curl -fsSL "${URL}/healthz" -o /dev/null
+          URL="$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')"
+          echo "Service URL: $URL"
+          # gọi endpoint healthz để check 200
+          curl -fsS "$URL/healthz"
+
