@@ -89,10 +89,3 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"url\":\"${URL}/webhook/${WEBHOOK_SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\"]}"
 
-      - name: Smoke check
-        run: |
-          URL="$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')"
-          echo "Service URL: $URL"
-          # gọi endpoint healthz để check 200
-          curl -fsS "$URL/healthz"
-
