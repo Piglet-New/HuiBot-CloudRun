@@ -9,8 +9,8 @@ env:
   PROJECT_ID: ${{ secrets.PROJECT_ID }}
   REGION: ${{ secrets.REGION }}
   SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-  REPO_NAME: huibot                  # Artifact Registry repo name
-  IMAGE_NAME: huibot                 # Container image name
+  REPO_NAME: huibot
+  IMAGE_NAME: huibot
   AR_HOST: ${{ secrets.REGION }}-docker.pkg.dev
   BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
   WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
@@ -24,13 +24,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Auth vào Google Cloud bằng JSON key trong secret GCP_SA_KEY
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      # Cài gcloud + chọn project
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
@@ -40,7 +38,6 @@ jobs:
       - name: Set gcloud project
         run: gcloud config set project $PROJECT_ID
 
-      # Bật API cần thiết (idempotent)
       - name: Enable required APIs
         run: |
           gcloud services enable \
@@ -50,18 +47,17 @@ jobs:
             --project $PROJECT_ID
           sleep 15
 
-      # Tạo repo Artifact Registry nếu chưa có
       - name: Ensure Artifact Registry repo exists
         run: |
           gcloud artifacts repositories describe "$REPO_NAME" \
             --location="$REGION" >/dev/null 2>&1 || \
           gcloud artifacts repositories create "$REPO_NAME" \
-            --repository-format=docker --location="$REGION"
+            --repository-format=docker \
+            --location="$REGION"
 
       - name: Configure Docker auth
         run: gcloud auth configure-docker ${AR_HOST} -q
 
-      # Build & push image
       - name: Build & Push image
         run: |
           IMAGE="${AR_HOST}/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:$GITHUB_SHA"
@@ -69,7 +65,6 @@ jobs:
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
 
-      # Deploy Cloud Run
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "$SERVICE_NAME" \
@@ -80,7 +75,6 @@ jobs:
             --port 8080 \
             --set-env-vars BOT_TOKEN="${BOT_TOKEN}",ADMIN_CHAT_ID="${ADMIN_CHAT_ID}",WEBHOOK_BASE="",WEBHOOK_SECRET="${WEBHOOK_SECRET}",DATABASE_URL="${DATABASE_URL}"
 
-      # Lấy URL dịch vụ
       - name: Get Service URL
         id: url
         run: |
@@ -88,7 +82,6 @@ jobs:
           echo "url=$URL" >> $GITHUB_OUTPUT
           echo "Service URL: $URL"
 
-      # Đặt webhook Telegram
       - name: Set Telegram webhook
         run: |
           URL="${{ steps.url.outputs.url }}"
@@ -96,7 +89,6 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"url\":\"${URL}/webhook/${WEBHOOK_SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\"]}"
 
-      # Kiểm tra /healthz
       - name: Smoke check
         run: |
           URL="${{ steps.url.outputs.url }}"
