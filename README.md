@@ -93,3 +93,5 @@ python -m tools.set_webhook
 ## 5) Notes
 - This is a clean port focused on stability; business rules are basic but the **Wizard UX** is preserved.
 - Extend handlers in `bot/handlers_*.py`.
+
+// preparing for PR
