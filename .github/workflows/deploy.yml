@@ -37,8 +37,19 @@ jobs:
           project_id: ${{ secrets.PROJECT_ID }}
           install_components: 'beta'
 
-      - name: Set gcloud project
+         - name: Set gcloud project
         run: gcloud config set project $PROJECT_ID
+
+      # ✅ BẬT API bắt buộc (idempotent, chạy nhiều lần không sao)
+      - name: Enable required APIs
+        run: |
+          gcloud services enable \
+            artifactregistry.googleapis.com \
+            run.googleapis.com \
+            cloudbuild.googleapis.com \
+            --project $PROJECT_ID
+          # đợi vài giây để quyền propagate
+          sleep 15
 
       - name: Ensure Artifact Registry repo exists
         run: |
