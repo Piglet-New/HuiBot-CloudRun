@@ -3,50 +3,66 @@ name: Deploy Cloud Run
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - "**/*.py"
+      - "Dockerfile"
+      - "requirements.txt"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 env:
+  # ====== GCP / Cloud Run ======
   PROJECT_ID: ${{ secrets.PROJECT_ID }}
-  REGION: ${{ secrets.REGION }}
+  REGION:     ${{ secrets.REGION }}
   SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-  REPO_NAME: huibot
-  IMAGE_NAME: huibot
+
+  # Artifact Registry host theo region (ví dụ asia-southeast1)
   AR_HOST: ${{ secrets.REGION }}-docker.pkg.dev
-  BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+  REPO_NAME: cloudrun
+  IMAGE_NAME: huibot
+
+  # ====== App Secrets (ENV) ======
+  BOT_TOKEN:      ${{ secrets.BOT_TOKEN }}
+  ADMIN_CHAT_ID:  ${{ secrets.ADMIN_CHAT_ID }}
   WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-  ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
-  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  DATABASE_URL:   ${{ secrets.DATABASE_URL }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 1) Auth với GCP bằng JSON key (Service Account)
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
+      # 2) Cài gcloud CLI
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.PROJECT_ID }}
-          install_components: 'beta'
+          project_id: ${{ env.PROJECT_ID }}
+          install_components: "beta"
 
-      - name: Set gcloud project
-        run: gcloud config set project $PROJECT_ID
-
+      # 3) Bật API cần thiết (idempotent)
       - name: Enable required APIs
         run: |
           gcloud services enable \
             artifactregistry.googleapis.com \
             run.googleapis.com \
             cloudbuild.googleapis.com \
-            --project $PROJECT_ID
-          sleep 15
+            --project "$PROJECT_ID"
+          # đợi propagate 1 chút
+          sleep 10
 
+      # 4) Đảm bảo Artifact Registry repo tồn tại
       - name: Ensure Artifact Registry repo exists
         run: |
           gcloud artifacts repositories describe "$REPO_NAME" \
@@ -55,16 +71,19 @@ jobs:
             --repository-format=docker \
             --location="$REGION"
 
+      # 5) Docker auth với Artifact Registry
       - name: Configure Docker auth
-        run: gcloud auth configure-docker ${AR_HOST} -q
+        run: gcloud auth configure-docker $AR_HOST -q
 
+      # 6) Build & Push image
       - name: Build & Push image
         run: |
-          IMAGE="${AR_HOST}/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:$GITHUB_SHA"
+          IMAGE="${AR_HOST}/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:${GITHUB_SHA}"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
 
+      # 7) Deploy to Cloud Run
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "$SERVICE_NAME" \
@@ -75,17 +94,27 @@ jobs:
             --port 8080 \
             --set-env-vars BOT_TOKEN="${BOT_TOKEN}",ADMIN_CHAT_ID="${ADMIN_CHAT_ID}",WEBHOOK_BASE="",WEBHOOK_SECRET="${WEBHOOK_SECRET}",DATABASE_URL="${DATABASE_URL}"
 
+      # 8) Lấy Service URL
       - name: Get Service URL
         id: url
         run: |
           URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')
-          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Service URL: $URL"
 
+      # 9) Đăng ký Telegram webhook
       - name: Set Telegram webhook
+        if: env.BOT_TOKEN != ''
         run: |
           URL="${{ steps.url.outputs.url }}"
           curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
             -H "Content-Type: application/json" \
             -d "{\"url\":\"${URL}/webhook/${WEBHOOK_SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\"]}"
 
+      # 10) Smoke check (gọi /healthz thay vì "/")
+      - name: Smoke check
+        run: |
+          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')
+          echo "Service URL: $URL"
+          # in header để debug nếu cần
+          curl -fsS -i "$URL/healthz"
