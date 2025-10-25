@@ -13,4 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Run your app
-CMD ["python", "app.py"]
+# ... phần trên giữ nguyên
+ENV PORT=8080
+CMD ["sh","-c","uvicorn app:app --host 0.0.0.0 --port ${PORT}"]
