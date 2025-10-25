@@ -9,8 +9,8 @@ env:
   PROJECT_ID: ${{ secrets.PROJECT_ID }}
   REGION: ${{ secrets.REGION }}
   SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-  REPO_NAME: huibot
-  IMAGE_NAME: huibot
+  REPO_NAME: huibot               # Artifact Registry repo name
+  IMAGE_NAME: huibot              # Container image name
   AR_HOST: ${{ secrets.REGION }}-docker.pkg.dev
   BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
   WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
@@ -30,6 +30,13 @@ jobs:
           project_id: ${{ secrets.PROJECT_ID }}
           service_account_key: ${{ secrets.GCP_SA_KEY }}
           export_default_credentials: true
+
+      # ✅ FIX: kích hoạt SA + chọn project (sửa lỗi "no active account")
+      - name: Activate service account
+        run: gcloud auth activate-service-account --key-file="${GOOGLE_GHA_CREDS_PATH}"
+
+      - name: Set gcloud project
+        run: gcloud config set project $PROJECT_ID
 
       - name: Ensure Artifact Registry repo exists
         run: |
@@ -63,6 +70,7 @@ jobs:
         run: |
           URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')
           echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Service URL: $URL"
 
       - name: Set Telegram webhook
         run: |
