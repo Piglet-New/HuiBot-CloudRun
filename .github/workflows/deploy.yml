@@ -9,8 +9,8 @@ env:
   PROJECT_ID: ${{ secrets.PROJECT_ID }}
   REGION: ${{ secrets.REGION }}
   SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-  REPO_NAME: huibot               # Artifact Registry repo name
-  IMAGE_NAME: huibot              # Container image name
+  REPO_NAME: huibot
+  IMAGE_NAME: huibot
   AR_HOST: ${{ secrets.REGION }}-docker.pkg.dev
   BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
   WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
@@ -24,16 +24,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ✅ Auth đúng chuẩn: dùng auth@v2 với JSON key
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      # ✅ Cài gcloud và set project
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
-
-      # ✅ FIX: kích hoạt SA + chọn project (sửa lỗi "no active account")
-      - name: Activate service account
-        run: gcloud auth activate-service-account --key-file="${GOOGLE_GHA_CREDS_PATH}"
+          install_components: 'beta'
 
       - name: Set gcloud project
         run: gcloud config set project $PROJECT_ID
