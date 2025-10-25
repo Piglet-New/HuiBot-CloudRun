@@ -1,0 +1,77 @@
+name: Deploy Cloud Run
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.PROJECT_ID }}
+  REGION: ${{ secrets.REGION }}
+  SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
+  REPO_NAME: huibot
+  IMAGE_NAME: huibot
+  AR_HOST: ${{ secrets.REGION }}-docker.pkg.dev
+  BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+  WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+  ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Ensure Artifact Registry repo exists
+        run: |
+          gcloud artifacts repositories describe "$REPO_NAME" \
+            --location="$REGION" >/dev/null 2>&1 || \
+          gcloud artifacts repositories create "$REPO_NAME" \
+            --repository-format=docker --location="$REGION"
+
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker ${AR_HOST} -q
+
+      - name: Build & Push image
+        run: |
+          IMAGE="${AR_HOST}/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:$GITHUB_SHA"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE_NAME" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --set-env-vars BOT_TOKEN="${BOT_TOKEN}",ADMIN_CHAT_ID="${ADMIN_CHAT_ID}",WEBHOOK_BASE="",WEBHOOK_SECRET="${WEBHOOK_SECRET}",DATABASE_URL="${DATABASE_URL}"
+
+      - name: Get Service URL
+        id: url
+        run: |
+          URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Set Telegram webhook
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+          curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+            -H "Content-Type: application/json" \
+            -d "{\"url\":\"${URL}/webhook/${WEBHOOK_SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\"]}"
+
+      - name: Smoke check
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+          curl -fsSL "${URL}/healthz" -o /dev/null
