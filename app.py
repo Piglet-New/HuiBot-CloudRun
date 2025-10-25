@@ -45,3 +45,7 @@ async def telegram_webhook(secret: str, request: Request):
     data = await request.json()
     await handle_update(data)
     return {"ok": True}
+
+@app.get("/")
+def root():
+    return {"ok": True, "service": "Hui Bot Cloud Run"}
