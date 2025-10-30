@@ -13,7 +13,7 @@ spec:
         autoscaling.knative.dev/target: "80"
     spec:
       containers:
-        - image: gcr.io/huibot-368349924534/huibot:latest
+        - image: gcr.io/$PROJECT_ID/huibot:latest
           ports:
             - containerPort: 8080
           env:
@@ -21,6 +21,8 @@ spec:
               value: "Hui-2025-@"
             - name: BOT_TOKEN
               value: "8043072033:AAEO5f7PhiDtsojozhqEtjnYc5HJexPmQ5c"
+            - name: DB_PATH
+              value: "db/hui.db"
           resources:
             limits:
               cpu: "1"
