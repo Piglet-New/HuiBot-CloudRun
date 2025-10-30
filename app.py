@@ -140,7 +140,7 @@ async def notify_admin(text: str):
 
 # ================= Commands =================
 async def cmd_start(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await upd.message.reply_text("👋 Hụi Bot Cloud Run đã sẵn sàng. Gõ /lenh để xem lệnh.")
+    await upd.message.reply_text("👋 HỤI BOT – TèLe đã sẵn sàng. Gõ /lenh để xem lệnh.")
 
 def _int_like(s: str) -> int:
     m = re.search(r"-?\d+", s or "")
@@ -156,7 +156,8 @@ async def cmd_lenh(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "Ví dụ: /tao Hui10tr tuần 02-08-2025 27 2tr 5% 10% 50%\n\n"
         "/tham <mã_dây> <kỳ> <số_tiền_thăm> [DD-MM-YYYY]\n"
         "Ví dụ: /tham 1 1 2tr 10-11-2025\n\n"
-        "/hen <mã_dây> <HH:MM>  · /danhsach · /tomtat <mã_dây> · /hottot <mã_dây> [Roi%|Lãi] · /dong <mã_dây>\n"
+        "/hen <mã_dây> <HH:MM>\n"
+        "/danhsach \n/tomtat <mã_dây>\n/hottot <mã_dây> [Roi%|Lãi]\n/dong <mã_dây>\n"
         "/baocao [chat_id]"
     )
 
@@ -194,7 +195,7 @@ async def _create_line_and_reply(upd: Update, name, kind, start_user, legs, cont
     await upd.message.reply_text(
         f"✅ Tạo dây #{line_id} ({name}) — {'Hụi Tuần' if period_days==7 else 'Hụi Tháng'}\n"
         f"• Mở: {to_user_str(start_dt)} · Chân: {legs} · Mệnh giá: {contrib_i:,} VND\n"
-        f"• Sàn {base_rate:.2f}% · Trần {cap_rate:.2f}% · Đầu thảo {thau_rate:.2f}% (trên M)\n"
+        f"• Sàn {base_rate:.2f}% · Trần {cap_rate:.2f}% · Đầu thảo {thau_rate:.2f}% (hụi dây)\n"
         f"⏰ Nhắc mặc định: 08:00 (đổi bằng /hen {line_id} HH:MM)\n"
         f"➡️ Nhập thăm: /tham {line_id} <kỳ> <số_tiền_thăm> [DD-MM-YYYY]"
     )
@@ -372,7 +373,7 @@ def list_text() -> str:
     for r in rows:
         kind = "Tuần" if int(r["period_days"])==7 else "Tháng"
         out.append(
-            f"• #{r['id']} · {r['name']} · {kind} · mở {to_user_str(parse_iso(r['start_date']))} · chân {r['legs']} · M {int(r['contrib']):,} VND · "
+            f"• #{r['id']} · {r['name']} · {kind} · mở {to_user_str(parse_iso(r['start_date']))} · chân {r['legs']} · hụi dây {int(r['contrib']):,} VND · "
             f"sàn {float(r['base_rate']):.2f}% · trần {float(r['cap_rate']):.2f}% · thầu {float(r['thau_rate']):.2f}% · nhắc {int(r['remind_hour']):02d}:{int(r['remind_min']):02d} · {r['status']}"
         )
     return "\n".join(out)
@@ -392,7 +393,7 @@ async def cmd_tomtat(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not line: return await upd.message.reply_text("❌ Không tìm thấy dây.")
     bids = get_bids(line_id)
     M, N = int(line["contrib"]), int(line["legs"])
-    cfg_line = f"Sàn {float(line.get('base_rate',0)):.2f}% · Trần {float(line.get('cap_rate',100)):.2f}% · Đầu thảo {float(line.get('thau_rate',0)):.2f}% (trên M)"
+    cfg_line = f"Sàn {float(line.get('base_rate',0)):.2f}% · Trần {float(line.get('cap_rate',100)):.2f}% · Đầu thảo {float(line.get('thau_rate',0)):.2f}% (hụi dây)"
     k_now = max(1, min(len(bids)+1, N))
     p, r, po, paid = compute_profit_var(line, k_now, bids)
     bestk, (bp, br, bpo, bpaid) = best_k_var(line, bids, metric="roi")
