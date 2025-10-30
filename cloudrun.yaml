@@ -18,13 +18,15 @@ spec:
             - containerPort: 8080
           env:
             - name: WEBHOOK_SECRET
-              value: "Hui-2025-@"
+              value: "PUT-YOUR-SECRET-HERE"
             - name: BOT_TOKEN
-              value: "8043072033:AAEO5f7PhiDtsojozhqEtjnYc5HJexPmQ5c"
+              value: "PUT-YOUR-TELEGRAM-BOT-TOKEN-HERE"
+            - name: ADMIN_CHAT_ID
+              value: "0"
             - name: DB_PATH
               value: "db/hui.db"
           resources:
             limits:
               cpu: "1"
               memory: "512Mi"
-      containerConcurrency: 80
+  containerConcurrency: 80
