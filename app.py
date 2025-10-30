@@ -3,14 +3,17 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from typing import Optional, Tuple
 
+# Telegram (PTB v20)
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
+# DB (SQLite helpers)
 from db_sqlite import (
     init_db, ensure_schema, cfg_get, cfg_set,
     get_all, exec_sql, insert_and_get_id
 )
 
+# ================= Flask app & config =================
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("huibot")
@@ -21,6 +24,7 @@ ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 
 ISO_FMT = "%Y-%m-%d"
 
+# ================= Utils =================
 def strip_accents(s: str) -> str:
     return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c))
 
@@ -37,7 +41,7 @@ def _smart_parse_dmy(s: str) -> Tuple[int,int,int]:
     d, m, y = parts
     d, m, y = int(d), int(m), int(y)
     if y < 100:  y += 2000
-    datetime(y, m, d)
+    datetime(y, m, d)  # validate
     return d, m, y
 
 def parse_user_date(s: str) -> datetime:
@@ -50,8 +54,13 @@ def to_iso_str(d: datetime) -> str:
 def to_user_str(d: datetime) -> str:
     return d.strftime("%d-%m-%Y")
 
+# Money & Percent parsers
 def parse_money(text: str) -> int:
-    s = str(text).strip().lower().replace(",", "").replace("_", "").replace(" ", "").replace(".", "")
+    """
+    Chấp nhận: 2tr, 5tr, 2000000, 2000k, 2.000.000, '1500k', '1.5m', ...
+    """
+    s = str(text).strip().lower()
+    s = s.replace(",", "").replace("_", "").replace(" ", "").replace(".", "")
     if s.isdigit():
         return int(s)
     try:
@@ -62,6 +71,18 @@ def parse_money(text: str) -> int:
     except Exception:
         raise ValueError(f"Không hiểu giá trị tiền: {text}")
 
+def parse_percent(x: str) -> float:
+    """
+    Chấp nhận: '5', '5%', '5,5', '5.5' -> float
+    """
+    s = str(x).strip().lower()
+    s = s.replace('%', '').replace(' ', '')
+    s = s.replace(',', '.')  # 5,5 -> 5.5
+    if s == '':
+        raise ValueError("giá trị % trống")
+    return float(s)
+
+# ---------- Business helpers ----------
 def k_date(line, k: int) -> datetime:
     return parse_iso(line["start_date"]) + timedelta(days=(k-1)*int(line["period_days"]))
 
@@ -104,8 +125,10 @@ def is_finished(line) -> bool:
     last = k_date(line, int(line["legs"])).date()
     return datetime.now().date() >= last
 
+# ---------- DB init ----------
 init_db(); ensure_schema()
 
+# ================= Telegram Bot state =================
 app_state = {"loop": None, "application": None, "started": False}
 
 async def notify_admin(text: str):
@@ -115,6 +138,7 @@ async def notify_admin(text: str):
         except Exception:
             logger.exception("notify_admin failed")
 
+# ================= Commands =================
 async def cmd_start(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await upd.message.reply_text("👋 Hụi Bot Cloud Run đã sẵn sàng. Gõ /lenh để xem lệnh.")
 
@@ -125,11 +149,15 @@ def _int_like(s: str) -> int:
 
 async def cmd_lenh(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await upd.message.reply_text(
-        "🌟 LỆNH CHÍNH (DD-MM-YYYY):\n"
+        "🌟 LỆNH CHÍNH (định dạng ngày DD-MM-YYYY)\n"
         "/tao <tên> <tuần|tháng> <DD-MM-YYYY> <số_chân> <mệnh_giá> <sàn_%> <trần_%> <đầu_thảo_%>\n"
+        "  • mệnh_giá: 2tr | 2.000.000 | 2000000 | 2000k\n"
+        "  • %: 5 | 5% | 5,5\n"
+        "Ví dụ: /tao Hui10tr tuần 02-08-2025 27 2tr 5% 10% 50%\n\n"
         "/tham <mã_dây> <kỳ> <số_tiền_thăm> [DD-MM-YYYY]\n"
-        "/hen <mã_dây> <HH:MM>\n"
-        "/danhsach\n/tomtat <mã_dây>\n/hottot <mã_dây> [Roi%|Lãi]\n/dong <mã_dây>\n/baocao [chat_id]"
+        "Ví dụ: /tham 1 1 2tr 10-11-2025\n\n"
+        "/hen <mã_dây> <HH:MM>  · /danhsach · /tomtat <mã_dây> · /hottot <mã_dây> [Roi%|Lãi] · /dong <mã_dây>\n"
+        "/baocao [chat_id]"
     )
 
 async def cmd_setreport(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -149,9 +177,12 @@ async def _create_line_and_reply(upd: Update, name, kind, start_user, legs, cont
     start_dt  = parse_user_date(start_user)
     start_iso = to_iso_str(start_dt)
     legs      = int(legs)
-    contrib_i = parse_money(contrib)
-    base_rate = float(base_rate); cap_rate = float(cap_rate); thau_rate = float(thau_rate)
-    if not (0 <= base_rate <= cap_rate <= 100): raise ValueError("sàn% <= trần% và trong [0..100]")
+    contrib_i = int(contrib)         # đã parse ở cmd_tao
+    base_rate = float(base_rate)     # đã parse ở cmd_tao
+    cap_rate  = float(cap_rate)
+    thau_rate = float(thau_rate)
+    # Ràng buộc
+    if not (0 <= base_rate <= cap_rate <= 100): raise ValueError("sàn% ≤ trần% ≤ 100")
     if not (0 <= thau_rate <= 100): raise ValueError("đầu thảo% trong [0..100]")
 
     line_id = insert_and_get_id(
@@ -168,27 +199,146 @@ async def _create_line_and_reply(upd: Update, name, kind, start_user, legs, cont
         f"➡️ Nhập thăm: /tham {line_id} <kỳ> <số_tiền_thăm> [DD-MM-YYYY]"
     )
 
+# ----- /tao với báo lỗi chi tiết -----
 async def cmd_tao(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    # /tao <tên> <tuần|tháng> <DD-MM-YYYY> <số_chân> <mệnh_giá> <sàn_%> <trần_%> <đầu_thảo_%>
     if len(ctx.args) < 8:
-        return await upd.message.reply_text("❗Cú pháp: /tao <tên> <tuần|tháng> <DD-MM-YYYY> <số_chân> <mệnh_giá> <sàn_%> <trần_%> <đầu_thảo_%>")
+        return await upd.message.reply_text(
+            "❗ Cú pháp:\n"
+            "/tao <tên> <tuần|tháng> <DD-MM-YYYY> <số_chân> <mệnh_giá> <sàn_%> <trần_%> <đầu_thảo_%>\n\n"
+            "Ví dụ:\n"
+            "• /tao Hui10tr tuần 02-08-2025 27 2tr 5% 10% 50%\n"
+            "• /tao Hui5tr tháng 15-11-2025 12 5.000.000 4,5 15 40\n\n"
+            "Ghi chú:\n"
+            "• <mệnh_giá>: 2tr, 2000000, 2000k, 2.000.000 đều được\n"
+            "• %: có thể viết 5 hoặc 5% hoặc 5,5"
+        )
+
+    name, kind, user_date, legs_s, contrib_s, base_s, cap_s, thau_s = ctx.args[:8]
+
+    # 1) Ngày
     try:
-        await _create_line_and_reply(upd, *ctx.args[:8])
+        _ = parse_user_date(user_date)
+    except Exception:
+        return await upd.message.reply_text(
+            f"❌ Ngày không hợp lệ: `{user_date}`. Định dạng đúng: DD-MM-YYYY. Ví dụ: 02-08-2025"
+        )
+
+    # 2) Số chân
+    try:
+        legs = int(legs_s)
+        if legs <= 0:
+            raise ValueError()
+    except Exception:
+        return await upd.message.reply_text(
+            f"❌ <số_chân> không hợp lệ: `{legs_s}`. Ví dụ đúng: 12 hoặc 27"
+        )
+
+    # 3) Mệnh giá
+    try:
+        contrib = parse_money(contrib_s)
+        if contrib <= 0:
+            raise ValueError()
+    except Exception:
+        return await upd.message.reply_text(
+            f"❌ <mệnh_giá> không hợp lệ: `{contrib_s}`.\n"
+            "Ví dụ: 2tr · 5tr · 2000000 · 2000k · 2.000.000"
+        )
+
+    # 4) % sàn / trần / đầu thảo
+    try:
+        base_rate = parse_percent(base_s)
+    except Exception:
+        return await upd.message.reply_text(
+            f"❌ <sàn_%> không hợp lệ: `{base_s}`. Ví dụ: 5 hoặc 5% hoặc 5,5"
+        )
+    try:
+        cap_rate = parse_percent(cap_s)
+    except Exception:
+        return await upd.message.reply_text(
+            f"❌ <trần_%> không hợp lệ: `{cap_s}`. Ví dụ: 10 hoặc 10%"
+        )
+    try:
+        thau_rate = parse_percent(thau_s)
+    except Exception:
+        return await upd.message.reply_text(
+            f"❌ <đầu_thảo_%> không hợp lệ: `{thau_s}`. Ví dụ: 50 hoặc 50%"
+        )
+
+    # Ràng buộc %
+    if not (0 <= base_rate <= cap_rate <= 100):
+        return await upd.message.reply_text(
+            f"❌ Ràng buộc % sai.\n"
+            f"Yêu cầu: 0 ≤ sàn% ≤ trần% ≤ 100.\n"
+            f"Bạn nhập: sàn {base_rate} · trần {cap_rate}."
+        )
+    if not (0 <= thau_rate <= 100):
+        return await upd.message.reply_text(
+            f"❌ <đầu_thảo_%> phải trong khoảng [0..100]. Bạn nhập: {thau_rate}"
+        )
+
+    # OK → tạo dây
+    try:
+        await _create_line_and_reply(
+            upd, name, kind, user_date, legs, contrib, base_rate, cap_rate, thau_rate
+        )
     except Exception as e:
         logger.exception("cmd_tao error: %s", e)
-        await upd.message.reply_text(f"⚠️ Lỗi: {e}")
+        await upd.message.reply_text(f"⚠️ Lỗi khi tạo dây: {e}")
 
-async def _save_tham_msg(upd: Update, line_id: int, k: int, bid: int, rdate_iso: Optional[str]):
+# ----- /tham với báo lỗi chi tiết -----
+async def cmd_tham(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if len(ctx.args) < 3:
+        return await upd.message.reply_text(
+            "❗ Cú pháp: /tham <mã_dây> <kỳ> <số_tiền_thăm> [DD-MM-YYYY]\n"
+            "Ví dụ: /tham 1 1 2tr 10-11-2025"
+        )
+    # 1) mã dây & kỳ
+    try:
+        line_id = int(ctx.args[0])
+    except Exception:
+        return await upd.message.reply_text(f"❌ <mã_dây> phải là số: `{ctx.args[0]}`")
+    try:
+        k = int(ctx.args[1])
+    except Exception:
+        return await upd.message.reply_text(f"❌ <kỳ> phải là số: `{ctx.args[1]}`")
+
+    # 2) tải dây
     rows = get_all("SELECT * FROM lines WHERE id=?", (line_id,))
-    if not rows:  return await upd.message.reply_text("❌ Không tìm thấy dây.")
+    if not rows:
+        return await upd.message.reply_text("❌ Không tìm thấy dây.")
     line = rows[0]
-    if not (1 <= k <= int(line["legs"])): return await upd.message.reply_text(f"❌ Kỳ hợp lệ 1..{line['legs']}.")
+    if not (1 <= k <= int(line["legs"])):
+        return await upd.message.reply_text(f"❌ Kỳ hợp lệ 1..{line['legs']}.")
+
+    # 3) parse tiền thăm + kiểm tra min/max theo sàn/trần
+    try:
+        bid = parse_money(ctx.args[2])
+    except Exception:
+        return await upd.message.reply_text(
+            f"❌ <số_tiền_thăm> không hợp lệ: `{ctx.args[2]}`.\n"
+            "Ví dụ: 2tr, 500000, 1.500.000"
+        )
+
     M = int(line["contrib"])
     min_bid = int(round(M * float(line.get("base_rate", 0)) / 100.0))
     max_bid = int(round(M * float(line.get("cap_rate", 100)) / 100.0))
-    if bid < min_bid or bid > max_bid:
+
+    if len(ctx.args) >= 4:
+        try:
+            rdate_iso = to_iso_str(parse_user_date(ctx.args[3]))
+        except Exception:
+            return await upd.message.reply_text(
+                f"❌ Ngày không hợp lệ: `{ctx.args[3]}`. Định dạng đúng: DD-MM-YYYY."
+            )
+    else:
+        rdate_iso = None
+
+    if not (min_bid <= bid <= max_bid):
         return await upd.message.reply_text(
-            f"❌ Thăm phải trong [{min_bid:,} .. {max_bid:,}] VND "
-            f"(Sàn {line['base_rate']}% · Trần {line['cap_rate']}% · M={M:,})"
+            "❌ Số tiền thăm nằm ngoài khoảng hợp lệ.\n"
+            f"Khoảng đúng: [{min_bid:,} .. {max_bid:,}] VND\n"
+            f"— Sàn {line['base_rate']}% · Trần {line['cap_rate']}% · M={M:,}"
         )
 
     exec_sql(
@@ -197,21 +347,9 @@ async def _save_tham_msg(upd: Update, line_id: int, k: int, bid: int, rdate_iso:
         (line_id, k, bid, rdate_iso)
     )
     await upd.message.reply_text(
-        f"✅ Lưu thăm kỳ {k} cho dây #{line_id}: {bid:,} VND" + (f" · ngày {to_user_str(parse_iso(rdate_iso))}" if rdate_iso else "")
+        f"✅ Lưu thăm kỳ {k} cho dây #{line_id}: {bid:,} VND"
+        + (f" · ngày {to_user_str(parse_iso(rdate_iso))}" if rdate_iso else "")
     )
-
-async def cmd_tham(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if len(ctx.args) < 3:
-        return await upd.message.reply_text("❗Cú pháp: /tham <mã_dây> <kỳ> <số_tiền_thăm> [DD-MM-YYYY]")
-    try:
-        line_id = int(ctx.args[0])
-        k = int(ctx.args[1])
-        bid = parse_money(ctx.args[2])
-        rdate_iso = to_iso_str(parse_user_date(ctx.args[3])) if len(ctx.args) >= 4 else None
-        await _save_tham_msg(upd, line_id, k, bid, rdate_iso)
-    except Exception as e:
-        logger.exception("cmd_tham error: %s", e)
-        await upd.message.reply_text(f"⚠️ Lỗi: {e}")
 
 async def cmd_hen(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(ctx.args) != 2:
@@ -304,6 +442,7 @@ async def cmd_huy(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def handle_text(upd: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await upd.message.reply_text("💡 Vui lòng dùng lệnh: /tao, /tham, /hen, /danhsach, /tomtat, /hottot, /dong, /baocao")
 
+# ================= Build PTB Application =================
 def build_app():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start",    cmd_start))
@@ -355,8 +494,10 @@ def run_bot_background():
     app_state["started"] = True
     run_bot_background._started = True
 
+# start bot in background when module loads (Cloud Run container start)
 run_bot_background()
 
+# ================= HTTP routes =================
 @app.get("/")
 def root():
     return "ok", 200
