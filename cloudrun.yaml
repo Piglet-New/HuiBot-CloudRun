@@ -1,0 +1,28 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: huibot
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/minInstances: "1"
+        run.googleapis.com/maxInstances: "3"
+        run.googleapis.com/execution-environment: gen2
+        autoscaling.knative.dev/target: "80"
+    spec:
+      containers:
+        - image: gcr.io/$PROJECT_ID/huibot:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: WEBHOOK_SECRET
+              value: "change-me"
+            - name: BOT_TOKEN
+              value: "paste-telegram-bot-token-here-or-use-actions-secret"
+          resources:
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+      containerConcurrency: 80

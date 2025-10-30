@@ -1,44 +1,59 @@
 import os
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import PlainTextResponse
-from dotenv import load_dotenv
+import logging
+from flask import Flask, request, jsonify
+import requests
 
-from bot.bot_core import dp, bot, handle_update
-from db import init_engine, run_migrations
+app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("huibot")
 
-load_dotenv()
+TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN", "")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "dev")
-PORT = int(os.getenv("PORT", "8080"))
+@app.get("/")
+def root():
+    return "ok", 200
 
-app = FastAPI(title="Hui Bot Cloud Run")
+@app.get("/health")
+def health():
+    return jsonify(status="ok"), 200
 
-# 🚀 Khởi tạo database và migrate khi container start
-@app.on_event("startup")
-async def on_startup():
-    await init_engine()
-    await run_migrations()
-    print("✅ DB initialized & migrations done!")
+def send_message(chat_id: int, text: str):
+    if not TELEGRAM_TOKEN:
+        logger.error("BOT_TOKEN is not set")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    try:
+        resp = requests.post(url, json={"chat_id": chat_id, "text": text})
+        if resp.status_code != 200:
+            logger.error("sendMessage failed: %s %s", resp.status_code, resp.text)
+    except Exception as e:
+        logger.exception("sendMessage exception: %s", e)
 
+@app.post("/webhook")
+def telegram_webhook():
+    expected = WEBHOOK_SECRET or ""
+    got = request.args.get("secret", "")
+    if expected and got != expected:
+        return "forbidden", 403
 
-# ✅ Health check cho Cloud Run
-@app.get("/healthz", response_class=PlainTextResponse)
-async def healthz():
-    return "ok"
+    update = request.get_json(silent=True) or {}
+    logger.info("Update: %s", update)
 
+    try:
+        message = update.get("message") or update.get("edited_message") or {}
+        if message:
+            chat = message.get("chat") or {}
+            chat_id = chat.get("id")
+            text = message.get("text") or ""
+            if chat_id and text:
+                reply = f"✅ Hụi Bot Cloud Run đã hoạt động! Bạn vừa gửi: {text}"
+                send_message(chat_id, reply)
+    except Exception as e:
+        logger.exception("handle update failed: %s", e)
 
-# ✅ Telegram Webhook endpoint
-@app.post("/webhook/{secret}")
-async def telegram_webhook(secret: str, request: Request):
-    if secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="forbidden")
+    return "ok", 200
 
-    data = await request.json()
-    await handle_update(data)
-    return {"ok": True}
-
-
-# 🏃 Run local mode (không dùng khi deploy)
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    port = int(os.environ.get("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port)

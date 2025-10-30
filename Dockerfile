@@ -1,16 +1,13 @@
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080
+
 WORKDIR /app
-
-COPY requirements.txt .
-
-RUN python -m pip install --upgrade pip setuptools wheel
-
+COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY . /app
 
-ENV PORT=8080
-
-# ✅ Chạy bằng uvicorn và reload webhook startup logs rõ ràng
-CMD exec uvicorn app:app --host 0.0.0.0 --port $PORT
+CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --timeout 0 app:app
