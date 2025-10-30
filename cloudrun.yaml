@@ -13,14 +13,14 @@ spec:
         autoscaling.knative.dev/target: "80"
     spec:
       containers:
-        - image: gcr.io/$PROJECT_ID/huibot:latest
+        - image: gcr.io/huibot-368349924534/huibot:latest
           ports:
             - containerPort: 8080
           env:
             - name: WEBHOOK_SECRET
-              value: "change-me"
+              value: "Hui-2025-@"
             - name: BOT_TOKEN
-              value: "paste-telegram-bot-token-here-or-use-actions-secret"
+              value: "8043072033:AAEO5f7PhiDtsojozhqEtjnYc5HJexPmQ5c"
           resources:
             limits:
               cpu: "1"
